@@ -125,9 +125,9 @@ async function getActiveTab() {
   return tabs?.[0] ?? null;
 }
 
-async function sendToTab(tabId, message) {
+async function sendToTab(tabId, message, options = {}) {
   const send = async () => {
-    const response = await chrome.tabs.sendMessage(tabId, message);
+    const response = await chrome.tabs.sendMessage(tabId, message, options);
     if (response?.ok === false) {
       throw new Error(response.error ?? "Action failed");
     }
@@ -148,12 +148,46 @@ async function sendToTab(tabId, message) {
   }
 }
 
-async function downloadBrightspaceFromPage(tabId, format) {
+async function downloadGoogleFromPage(tabId, format, chapterTabs = []) {
+  await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    args: [format, chapterTabs],
+    func: (selectedFormat, tabs) => {
+      const editorUrl = window.location.href;
+      if (
+        !/docs\.google\.com\/(document|presentation|spreadsheets)\/d\//.test(
+          editorUrl,
+        )
+      ) {
+        return;
+      }
+
+      const toExport = (tabId) =>
+        editorUrl.replace(
+          /\/edit.*$/,
+          `/export?format=${selectedFormat}${tabId ? `&tab=${tabId}` : ""}`,
+        );
+
+      if (tabs.length === 0) {
+        window.open(toExport());
+      } else {
+        for (const tabId of tabs) {
+          window.open(toExport(tabId));
+        }
+      }
+    },
+  });
+}
+
+async function downloadBrightspaceFromPage(tabId, format, tabs) {
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    args: [format],
-    func: (selectedFormat) => {
+    args: [format, tabs],
+    func: async (selectedFormat, selectedTabs) => {
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const normalize = (text) => text?.replace(/\s+/g, " ").trim();
+
       const getDocumentWithSelector = (selector) => {
         if (document.querySelector(selector)) {
           return document;
@@ -171,27 +205,93 @@ async function downloadBrightspaceFromPage(tabId, format) {
         return document;
       };
 
-      const root = getDocumentWithSelector(".header-button-tray");
-      const el = root.querySelector(".header-button-tray");
-      const parent = el?.parentElement;
-      const key =
-        parent && Object.keys(parent).find((k) => k.startsWith("__react"));
-      let inst = key ? parent[key] : null;
+      const getBrightspaceTabLink = () => {
+        const root = getDocumentWithSelector(".header-button-tray");
+        const el = root.querySelector(".header-button-tray");
+        const parent = el?.parentElement;
+        const key =
+          parent && Object.keys(parent).find((k) => k.startsWith("__react"));
+        let inst = key ? parent[key] : null;
 
-      while (inst && !inst._instance?.state?.selectedContentObject?.Url) {
-        inst = inst._currentElement?._owner || inst.return;
+        while (inst && !inst._instance?.state?.selectedContentObject?.Url) {
+          inst = inst._currentElement?._owner || inst.return;
+        }
+        return inst?._instance?.state?.selectedContentObject?.Url;
+      };
+
+      const getTopicElement = (title) => {
+        const root = getDocumentWithSelector(".navigation-tree");
+        const wantedTitle = normalize(title);
+        for (const item of root.querySelectorAll(".navigation-item")) {
+          const topic = item.querySelector(".topic");
+          const titleText = normalize(
+            topic?.querySelector(".title-text span")?.textContent,
+          );
+
+          if (topic && titleText === wantedTitle) {
+            return (
+              topic.querySelector(".topic-box[role='treeitem']") ||
+              topic.querySelector(".title-container") ||
+              topic
+            );
+          }
+        }
+        return null;
+      };
+
+      const downloadFromUrl = (url) => {
+        window.open(
+          url.replace(/\/edit.*$/, `/export?format=${selectedFormat}`),
+        );
+      };
+
+      const selectedTitles = (selectedTabs ?? [])
+        .map(normalize)
+        .filter(Boolean);
+      if (selectedTitles.length === 0) {
+        const url = getBrightspaceTabLink();
+        if (!url) return { downloaded: 0, missing: [] };
+        downloadFromUrl(url);
+        return { downloaded: 1, missing: [] };
       }
 
-      const url = inst?._instance?.state?.selectedContentObject?.Url;
-      if (!url) return null;
+      const missing = [];
+      let downloaded = 0;
 
-      window.open(url.replace(/\/edit.*$/, `/export?format=${selectedFormat}`));
-      return url;
+      for (const title of selectedTitles) {
+        const topicElement = getTopicElement(title);
+        if (!topicElement) {
+          missing.push(title);
+          continue;
+        }
+
+        topicElement.scrollIntoView({ block: "center" });
+        topicElement.click();
+        await delay(750);
+
+        const url = getBrightspaceTabLink();
+        if (!url) {
+          missing.push(title);
+          continue;
+        }
+
+        downloadFromUrl(url);
+        downloaded++;
+        await delay(250);
+      }
+
+      return { downloaded, missing };
     },
   });
 
-  if (!results[0]?.result) {
+  const result = results[0]?.result;
+  if (!result?.downloaded) {
     throw new Error("Could not find the current Brightspace tab link");
+  }
+  if (result.missing?.length) {
+    throw new Error(
+      `Downloaded ${result.downloaded}; missing: ${result.missing.join(", ")}`,
+    );
   }
 }
 
@@ -199,7 +299,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tab = await getActiveTab();
   if (!tab?.url || !tab.id) return;
 
-  const domain = new URL(tab.url).hostname;
+  const domain = tab.url;
 
   if (domain.includes("elearningontario")) {
     getDownloadOptions("PDF Document ( pdf)", "pdf");
@@ -231,6 +331,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         'input[name="downloadOptions"]:checked',
       )?.id;
 
+      const selectedTabs = Array.from(
+        e.target.querySelectorAll(
+          'input[name="brightspaceTabs"][data-role="inner"]:checked',
+        ),
+      );
+
       if (!selectedFormat) {
         setStatus("Select a download format.");
         return;
@@ -243,13 +349,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       setStatus("Downloading...");
       try {
-        await downloadBrightspaceFromPage(tab.id, selectedFormat);
+        await downloadBrightspaceFromPage(
+          tab.id,
+          selectedFormat,
+          selectedTabs.map((el) => el.value),
+        );
         setStatus("Done.");
       } catch (err) {
         setStatus(err?.message ?? String(err));
       }
     });
-  } else if (domain.startsWith("docs.google.com")) {
+  } else if (domain.includes("docs.google.com/document")) {
     getDownloadOptions("Microsoft Word (docx)", "docx");
     getDownloadOptions("PDF Document ( pdf)", "pdf");
     getDownloadOptions("OpenDocument Format (.odt)", "odt");
@@ -258,6 +368,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     getDownloadOptions("Web Page (.html, zipped)", "html");
     getDownloadOptions("EPUB Publication (epub)", "epub");
     getDownloadOptions("Markdown (.md)", "md");
+
+    const response = await sendToTab(
+      tab.id,
+      { action: "getTabs" },
+      { frameId: 0 },
+    );
+    for (const { id, name } of response?.tabs ?? []) {
+      addTabOption(name, id);
+    }
 
     const form = document.getElementById("downloadForm");
     form?.addEventListener("submit", async (e) => {
@@ -276,34 +395,48 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       setStatus("Downloading...");
-      const tab = await getActiveTab();
-
-      if (!tab?.id) {
-        setStatus("No active tab.");
-        return;
-      }
-
       try {
-        await sendToTab(tab.id, {
-          action: "downloadFile",
-          args: {
-            format: selectedFormat,
-            tabs: selectedTabElements.map((el) => el.value),
-          },
-        });
+        await downloadGoogleFromPage(
+          tab.id,
+          selectedFormat,
+          selectedTabElements.map((el) => el.value),
+        );
         setStatus("Done.");
       } catch (err) {
         setStatus(err?.message ?? String(err));
       }
     });
-    try {
-      const response = await sendToTab(tab.id, { action: "getTabs" });
-      for (const { id, name } of response?.tabs ?? []) {
-        addTabOption(name, id);
+  } else if (domain.includes("docs.google.com/presentation")) {
+    document.getElementById("tabsLabel").style.display = "none";
+    getDownloadOptions("Microsoft PowerPoint (pptx)", "pptx");
+    getDownloadOptions("ODP Document (odp)", "odp");
+    getDownloadOptions("PDF Document (.pdf)", "pdf");
+    getDownloadOptions("Plain Text (.txt)", "txt");
+    getDownloadOptions("JPEG image (jpg, current slide)", "jpg");
+    getDownloadOptions("PNG image (png, current slide)", "png");
+    getDownloadOptions("Scalable Vector Graphics (.svg, current slide)", "svg");
+
+    const form = document.getElementById("downloadForm");
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const selectedFormat = document.querySelector(
+        'input[name="downloadOptions"]:checked',
+      )?.id;
+
+      if (!selectedFormat) {
+        setStatus("Select a download format.");
+        return;
       }
-    } catch (err) {
-      setStatus(err?.message ?? String(err));
-    }
+
+      setStatus("Downloading...");
+      try {
+        await downloadGoogleFromPage(tab.id, selectedFormat);
+        setStatus("Done.");
+      } catch (err) {
+        setStatus(err?.message ?? String(err));
+      }
+    });
   } else {
     setStatus("Unsupported page.");
   }

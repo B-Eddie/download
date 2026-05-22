@@ -1,22 +1,44 @@
-function downloadTab(format, tab) {
-  const currentUrl = window.location.href;
+const GOOGLE_EDITOR_URL =
+  /docs\.google\.com\/(document|presentation|spreadsheets)\/d\//;
 
-  // get direct export link with tab parameter
-  const exportUrl = currentUrl.replace(
-    /\/edit.*$/,
-    `/export?format=${format}&tab=${tab}`,
-  );
-  window.open(exportUrl);
+function getGoogleEditorUrl() {
+  if (GOOGLE_EDITOR_URL.test(window.location.href)) {
+    return window.location.href;
+  }
+  try {
+    const topHref = window.top?.location?.href;
+    if (topHref && GOOGLE_EDITOR_URL.test(topHref)) {
+      return topHref;
+    }
+  } catch {
+    // cross-origin iframe
+  }
+  return null;
+}
+
+function canHandleGoogleDocsAction() {
+  return window === window.top && GOOGLE_EDITOR_URL.test(window.location.href);
+}
+
+function toGoogleExportUrl(url, format, tab = null) {
+  const suffix = tab ? `&tab=${tab}` : "";
+  return url.replace(/\/edit.*$/, `/export?format=${format}${suffix}`);
+}
+
+function downloadTab(format, tab) {
+  const currentUrl = getGoogleEditorUrl();
+  if (!currentUrl) {
+    throw new Error("Could not find Google Docs editor URL");
+  }
+  window.open(toGoogleExportUrl(currentUrl, format, tab));
 }
 
 function downloadAllTabs(format, url = null) {
-  if (url) {
-    window.open(url.replace(/\/edit.*$/, `/export?format=${format}`));
-  } else {
-    window.open(
-      window.location.href.replace(/\/edit.*$/, `/export?format=${format}`),
-    );
+  const targetUrl = url ?? getGoogleEditorUrl();
+  if (!targetUrl) {
+    throw new Error("Could not find Google Docs editor URL");
   }
+  window.open(toGoogleExportUrl(targetUrl, format));
 }
 
 async function downloadFile(args) {
@@ -135,7 +157,8 @@ function getBrightspaceTabLink() {
   const root = getDocumentWithSelector(".header-button-tray");
   const el = root.querySelector(".header-button-tray");
   const parent = el?.parentElement;
-  const key = parent && Object.keys(parent).find((k) => k.startsWith("__react"));
+  const key =
+    parent && Object.keys(parent).find((k) => k.startsWith("__react"));
   let inst = key ? parent[key] : null;
 
   while (inst && !inst._instance?.state?.selectedContentObject?.Url) {
@@ -163,11 +186,17 @@ const actions = {
   downloadBrightspaceTab: downloadBrightspaceTab,
 };
 
+const GOOGLE_DOC_ACTIONS = new Set(["downloadFile", "getTabs"]);
+
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   const handler = actions[request.action];
   if (!handler) {
     sendResponse({ ok: false, error: "Action not found" });
     return;
+  }
+
+  if (GOOGLE_DOC_ACTIONS.has(request.action) && !canHandleGoogleDocsAction()) {
+    return false;
   }
 
   const finish = (result) => {

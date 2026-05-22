@@ -1,3 +1,56 @@
+* {
+  margin: 0;
+  padding: 0;
+}
+body {
+  width: 20em;
+  height: 27.3125em;
+  background: #F9FAFD;
+  text-align: center;
+  font-family: 'Roboto', sans-serif;
+}
+
+h1 {
+  background: #F1F4F9;
+  margin-bottom: 2rem;
+  padding-top: .6em;
+  padding-bottom: .6em;
+}
+
+.options {
+  border: 1px solid #E0E0E0;
+  background: #FFFFFF;
+  padding: 0.75em;
+  margin-top: .8em;
+  margin-right: 1.5em;
+  margin-left: 1.5em;
+  margin-bottom: 1.5rem;
+  border-radius: 0.5rem;
+  text-align: left;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  margin: .2em;
+}
+
+#tabsLabel, #downloadOptionsLabel{
+  font-size: 1.4em;
+}
+
+button {
+  background: #D3E3FD;
+  padding: .5em 3em .5em 3em;
+  border-radius: 0.5rem;
+  border: 1px solid #C9C9C9;
+  transition: background 0.2s ease;
+  margin-bottom: 2em;
+}
+
+button:hover {
+  background: #e7f0ff;
+  cursor: pointer;
+}
+
 .brightspace-group {
   margin-bottom: 0.75rem;
 }
