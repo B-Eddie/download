@@ -1,0 +1,11 @@
+.brightspace-group {
+  margin-bottom: 0.75rem;
+}
+.brightspace-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.brightspace-inner {
+  margin-left: 1.25rem;
+}
