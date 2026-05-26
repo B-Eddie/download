@@ -300,6 +300,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!tab?.url || !tab.id) return;
 
   const domain = tab.url;
+  document.getElementById("domain").textContent = domain.split("/")[2];
 
   if (domain.includes("elearningontario")) {
     getDownloadOptions("PDF Document ( pdf)", "pdf");
@@ -438,6 +439,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
   } else {
-    setStatus("Unsupported page.");
+    // setStatus("Unsupported page.");
+    document.getElementById("domain").textContent = "Unsupported Page";
   }
 });

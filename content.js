@@ -79,11 +79,10 @@ function getTabs() {
           ?.trim() ||
         "";
 
-      if (!id || !name) return null;
-      return { id, name };
+      return { id: id || "", name: name || "" };
     })
     .filter((tab) => {
-      if (!tab || seen.has(tab.id)) return false;
+      if (seen.has(tab.id)) return false;
       seen.add(tab.id);
       return true;
     });
