@@ -240,9 +240,13 @@ async function downloadBrightspaceFromPage(tabId, format, tabs) {
       };
 
       const downloadFromUrl = (url) => {
-        window.open(
-          url.replace(/\/edit.*$/, `/export?format=${selectedFormat}`),
+        const driveMatch = url.match(
+          /drive\.google\.com\/file\/d\/([^/?#]+)/,
         );
+        const downloadUrl = driveMatch
+          ? `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`
+          : url.replace(/\/edit.*$/, `/export?format=${selectedFormat}`);
+        window.open(downloadUrl);
       };
 
       const selectedTitles = (selectedTabs ?? [])

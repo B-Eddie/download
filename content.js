@@ -20,9 +20,23 @@ function canHandleGoogleDocsAction() {
   return window === window.top && GOOGLE_EDITOR_URL.test(window.location.href);
 }
 
+const GOOGLE_DRIVE_FILE_URL = /drive\.google\.com\/file\/d\/([^/?#]+)/;
+
+function toGoogleDriveDownloadUrl(url) {
+  const match = url.match(GOOGLE_DRIVE_FILE_URL);
+  if (!match) return null;
+  return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+}
+
 function toGoogleExportUrl(url, format, tab = null) {
   const suffix = tab ? `&tab=${tab}` : "";
   return url.replace(/\/edit.*$/, `/export?format=${format}${suffix}`);
+}
+
+function toDownloadUrl(url, format, tab = null) {
+  const driveUrl = toGoogleDriveDownloadUrl(url);
+  if (driveUrl) return driveUrl;
+  return toGoogleExportUrl(url, format, tab);
 }
 
 function downloadTab(format, tab) {
@@ -30,7 +44,7 @@ function downloadTab(format, tab) {
   if (!currentUrl) {
     throw new Error("Could not find Google Docs editor URL");
   }
-  window.open(toGoogleExportUrl(currentUrl, format, tab));
+  window.open(toDownloadUrl(currentUrl, format, tab));
 }
 
 function downloadAllTabs(format, url = null) {
@@ -38,7 +52,7 @@ function downloadAllTabs(format, url = null) {
   if (!targetUrl) {
     throw new Error("Could not find Google Docs editor URL");
   }
-  window.open(toGoogleExportUrl(targetUrl, format));
+  window.open(toDownloadUrl(targetUrl, format));
 }
 
 async function downloadFile(args) {
